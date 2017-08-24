@@ -1,0 +1,632 @@
+%% LyX 2.0.3 created this file.  For more info, see http://www.lyx.org/.
+%% Do not edit unless you really know what you are doing.
+\documentclass{article}
+\usepackage{mathpazo}
+\usepackage{lmodern}
+\renewcommand{\sfdefault}{lmss}
+\renewcommand{\ttdefault}{lmtt}
+\usepackage[T1]{fontenc}
+\usepackage{geometry}
+\geometry{verbose,tmargin=2.5cm,bmargin=2.5cm,lmargin=2.5cm,rmargin=2.5cm}
+\usepackage{url}
+\usepackage[authoryear]{natbib}
+
+\makeatletter
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% User specified LaTeX commands.
+% \VignetteIndexEntry{An Introduction to knitr}
+
+\makeatother
+
+\begin{document}
+%\SweaveOpts{concordance=TRUE}
+
+
+\title{Multivariate analysis in \textbf{\textsf{R}}}
+
+\author{Oliver Purschke \\(with contributions from Helge Bruelheide, Henrik von Wehrden and Heike Zimmermann)}
+\date{January 27, 2017}
+
+\maketitle
+In this practical you will perform cluster and ordination analyses, using \textbf{\textsf{R}} and the add-on packages \textbf{vegan}: \textbf{gclus}, and \textbf{clustSim}. You will use three data sets (available in \textbf{vegan}), (i) the dune meadow vegetation (\textit{dune}) and environmental data (\textit{dune.env}), (ii) a reduced version of the \textit{dune} meadow vegetation data (five of the most common species in five sites) and (iii) the \textit{varespec} and \textit{varechem} data describing vegetation and soil characteristics in a pine forest.
+
+\section{Multivariate data}
+First, lets load the required \textbf{\textsf{R}} packages and data.
+
+<<echo=T, eval=T, message=FALSE>>=
+library(vegan)
+library(knitr)
+library(clusterSim)
+library(gclus)
+
+data(dune)
+data(dune.env)
+@
+\subsection{Exploring the \textit{dune} vegetation and environmental data}
+
+<<echo=T, eval=T>>=
+str(dune)
+str(dune.env)
+
+@ 
+\textbf{Question:} How many species were sampled in how many sites? What character do the environmental variables have?
+
+\subsection{Visualizing relationships among species and environmental variables}
+
+<<exploplot, fig.width=9, fig.height=2.5>>=
+
+par(mfrow=c(1,4))
+plot (dune[,5]~dune[,4],ylab=names(dune[5]), xlab=names(dune[4])) 
+abline(lm(dune[,5]~dune[,4]))
+plot (dune[,6]~dune[,4],ylab=names(dune[6]), xlab=names(dune[4])) 
+abline(lm(dune[,6]~dune[,4]))
+plot (dune[,5]~dune.env[,1],ylab=names(dune[5]), xlab=names(dune.env[1])) 
+abline(lm(dune[,5]~dune.env[,1]))
+plot (dune[,6]~dune.env[,1],ylab=names(dune[6]), xlab=names(dune.env[1])) 
+abline(lm(dune[,6]~dune.env[,1]))
+
+@ 
+To explore many pairwise relationships between species and between species and environmental variables at once, run the following function:
+
+<<tidy=TRUE>>=
+# Author: Francois Gillet, February 2007
+panel.cor <- function(x, y, method="pearson", digits=3, cex.cor=1.2)
+{
+usr <- par("usr"); on.exit(par(usr))
+par(usr = c(0, 1, 0, 1))
+r <- cor(x, y, method=method)
+ra <- cor.test(x, y, method=method)$p.value
+txt <- round(r, digits)
+sig <- 1
+prefix <- ""
+if(ra <= 0.1) prefix <- "."
+if(ra <= 0.05) prefix <- "*"
+if(ra <= 0.01) prefix <- "**"
+if(ra <= 0.001) prefix <- "***"
+if(ra <= 0.001) sig <- 2
+color <- 2
+if(r < 0) color <- 4
+# color <- "gray10"
+# if(r < 0) color <- "gray50"
+txt <- paste(txt, prefix, sep="\n")
+text(0.5, 0.5, txt, cex = cex.cor, font=sig, col=color)
+}
+## Put histograms on the diagonal
+panel.hist <- function(x, ...)
+{
+usr <- par("usr"); on.exit(par(usr))
+par(usr = c(usr[1:2], 0, 1.5) )
+h <- hist(x, plot = FALSE)
+breaks <- h$breaks; nB <- length(breaks)
+y <- h$counts; y <- y/max(y)
+rect(breaks[-nB], 0, breaks[-1], y, col="cyan", ...)
+# rect(breaks[-nB], 0, breaks[-1], y, col="gray", ...)
+}
+
+pairs(cbind(dune[,10:15], dune.env[,c(1,2,5)]), lower.panel=panel.smooth, upper.panel=panel.cor, diag.panel=panel.hist)
+
+@
+To quantify all possible inter-relations between the 30 species and the five environenmental descriptors, we would need to carry out 435 ($n*(n-1)/2$) separate analyses. This would be very tidious and still we wouldn't see the overall picture.
+
+\section{Multivatiate techniques}
+Multivariate methods help to  explore simultaneously the relationships between all the objects (e.g. sites) with respect to their characteristics (species composition).
+\subsection{A quick appetizer}
+<<fig.width=8, fig.height=4>>=
+
+dune.clust <- hclust(dist(dune), "ave")
+dune.ca <- decorana(dist(dune), ira = 1)
+par(mfrow = c(1,2))
+plot(dune.clust)
+plot(dune.ca, type = "t", display = "sites", main = "Ordination")
+
+@
+
+
+\section{Cluster analysis (step by step)}
+Here, you will perform hierarchical agglomerative clustering, which fuses objects (e.g. sites) together into single clusters that form a dendrogram.
+
+\subsection{Example using the reduced dune data set}
+Run cluster analysis on the small subset of the data (five sites x five species). Here, you use exactly the same settings (Manhattan-distance, average-linkage) that you used for generating the dendrogram in the exercise this morning.
+
+<<>>=
+
+?hclust
+dune5 <- dune[c(2,13,4,16,6), c(6,16,15,18,21)]
+
+dune5.man <- dist(dune5, "manhattan")
+dune5.man
+dune5.man.ave.clust <- hclust(dune5.man, method = "average")
+
+<<fig.width=3, fig.height=3>>=
+
+plot(dune5.man.ave.clust, xlab="", sub="")
+
+@ 
+\textbf{Q: Which two sites or groups of sites are most similar or most dissimilar? \\ Compare with the dendrogram you generated by hand. \\ Repeat the analysis with different types of linkage techniques; will those give you similar groupings of sites?}
+
+\subsection{Using the full \textbf{dune} data set}
+
+<<fig.width=4, fig.height=3.5>>=
+dune.man <- dist(dune, "manhattan")
+dune.man.ave.clust <- hclust(dune.man, method = "average")
+plot(dune.man.ave.clust, xlab="", sub="", cex=.8)
+
+@ 
+
+\subsubsection{Calculating and visualizing distance measures}
+So far, you have only used the Manhattan- (City-Block) distance. Try alternative distances as well, e.g. Euclidean distance.
+The \textbf{gclus} package and the coldiss - function (below) are very handy to visualize distance matrices (or square matrices in general).
+
+<<>>=
+
+# Author: Francois Gillet, August 2009
+
+coldiss <- function(D, nc = 4, byrank = TRUE, diag = FALSE)
+{
+require(gclus)
+if (max(D)>1) D <- D/max(D)
+if (byrank) {
+spe.color = dmat.color(1-D, cm.colors(nc))
+}
+else {
+spe.color = dmat.color(1-D, byrank=FALSE, cm.colors(nc))
+}
+spe.o = order.single(1-D)
+speo.color = spe.color[spe.o,spe.o]
+op = par(mfrow=c(1,2), pty="s")
+if (diag) {
+plotcolors(spe.color, rlabels=attributes(D)$Labels,
+main="Dissimilarity Matrix",
+dlabels=attributes(D)$Labels)
+plotcolors(speo.color, rlabels=attributes(D)$Labels[spe.o],
+main="Ordered Dissimilarity Matrix",
+dlabels=attributes(D)$Labels[spe.o])
+}
+else {
+plotcolors(spe.color, rlabels=attributes(D)$Labels,
+main="Dissimilarity Matrix")
+plotcolors(speo.color, rlabels=attributes(D)$Labels[spe.o],
+main="Ordered Dissimilarity Matrix")
+}
+par(op)
+}
+
+@ 
+Visualize Manhattan distances (magenta (reddish) - maximally similar; cyan (blueish) - maximally dissimilar):
+
+<<fig.width=8, fig.height=4>>=
+
+coldiss(dune.man, byrank = FALSE, diag = TRUE)
+
+@ 
+\textbf{Q: Compare with the Manhattan-distance matrix you calculated by hand?}
+\\
+
+Now, visualize euclidean distances:
+
+<<fig.width=8, fig.height=4>>=
+dune.euclid <- dist(dune, "euclid")
+coldiss(dune.euclid, byrank = FALSE, diag = TRUE)
+
+@ 
+\textbf{Q: Are the most similar pairs of sites according to Euclidian distances similar to those obtained using Manhattan distance?}
+\\
+FYI: Even more distance metrics can be calculated using the "vegdist"-function in \textit{vegan}.
+
+\subsubsection{Comparing distances - the Mantel test}
+Tests correlations between two distance matrices, the extent to which one matrix resembles another one. This is somehow similar to the Pearson's correlation coeffient (r), but significance testing is done differently (using permutations).
+
+<<>>=
+mantel(dune.man, dune.euclid)
+
+@ 
+
+\textbf{Q: Are the two distance matrices significantly similar to each other?}
+
+\subsubsection{Finding the optimal clustering procedure}
+You can use the following function to test among all possible combinations from a range of distance measures, linkage methods and number of clusters to find the optimal one.
+<<>>=
+
+library(clusterSim)
+?cluster.Sim
+clustsim <- cluster.Sim(dune, 3, 2, 4) 
+# 7- mixed data (e.g. intervals, such as the cover classes in the dune dataset)
+# 2- minimun number of clusters, 
+# 4 - maximum number of clusters
+clustsim[4:6]
+
+
+@ 
+\pagebreak
+\subsection{Linking cluster analysis to environmental data}
+
+Another clustering method (K-means clustering) can be used to generate a classification based on a prefined number of clusters (groups). Such groups can then be linked to measured environmental variables in an ANOVA-type of analysis.
+
+<<fig.width=8, fig.height=4, tidy=TRUE>>=
+
+kclust <- kmeans(dune, centers = 4)
+
+par(mfrow = c(1,2))
+for (i in c(1,5)){
+boxplot(dune.env[,i] ~ kclust$cluster, col = 3:6, main = colnames(dune.env)[i], xlab = "Cluster")
+}
+
+@ 
+\subsection{Advanced: Perform a cluster analysis on the \textit{varespec} data and link it to a continuous descriptor from the varechem data}
+
+\pagebreak
+\section{Ordination - Basic steps}
+\subsection{Two species example}
+
+Example from Legendre \& Legendre (1998), p. 392:
+
+<<fig.width=5, fig.height=4.5>>=
+Y1 <- matrix(c(2,3,5,7,9,1,4,0,6,2),nrow=5, ncol=2)
+Y1
+plot(Y1, pch=21, col="black", bg="black", cex=1.5)
+
+
+@ 
+\pagebreak
+\subsection{Centering the attributes in a data matrix}
+Shift of the origin of the coordinate system into the centre.
+
+<<fig.width=5, fig.height=4.5>>=
+Y2 <- matrix(0,nrow=5, ncol=2)
+Y2[,1] <- Y1[,1]-mean(Y1[,1])
+Y2[,2] <- Y1[,2]-mean(Y1[,2])
+Y2
+plot(Y2, pch=21, col="black", bg="black", cex=1.5, bty="n",  xaxt = "n", yaxt = "n")
+axis(1, pos=0)
+axis(2, pos=0)
+
+@ 
+\subsection{Rotation}
+Rotate the point cloud such that the maximum variance is found on the first axis.
+
+<<eval=T, echo=T, tidy=TRUE>>=
+
+dispersion.matrix <- t(Y2) %*% Y2
+
+# divide by n-1
+dispersion.matrix/4
+
+# or more simple
+S <- var(Y2)
+S
+
+# get the Eigenvectors
+U <- solve(eigen(S)$vectors)
+
+# matrix of eigenvectors U
+U
+F <- Y2 %*% t(U)
+
+<<fig.width=5, fig.height=4.5, tidy=TRUE>>=
+
+plot(F, pch=21, col="black", bg="black", cex=1.5, bty="n",  xaxt = "n", yaxt = "n", xlim=c(-4,4), ylim=c(-3,3))
+axis(1, pos=0)
+axis(2, pos=0)
+
+@ 
+
+\section{Unconstrained ordination (indirect gradient analysis)}
+\subsection{Principal component analysis - PCA}
+
+<<eval=T, echo=T>>=
+
+data(dune)
+model1<-rda(dune,center=T,scale=T)
+@ 
+Remember, because it is based on Euclidean distances but species similarities among sites based on species information are not strikly Euclidean, PCA is not really suitable for species cover values. However, appropiate transformations (such as Hellinger-transformation) can circumvent this problem.
+<<eval=T, echo=T>>=
+
+model2 <- rda(decostand(dune, "hell"),center=T,scale=T)
+
+<<fig.width=12, fig.height=6>>=
+
+par(mfrow=c(1,2))
+biplot(model1)
+biplot(model2)
+
+@ 
+\textbf{Q: Does the ordination based on untransformed species data yield different configurations of sites than the ordination based on Hellinger-transformed species data?}
+
+You can also print the summary of the eigenvalues which gives you the eigenvalues, proportion explained and cumulative proportion explained by the ordination axes (principal components):
+
+<<eval=T, echo=T>>=
+summary(eigenvals(model2))
+
+@ 
+\textbf{Q: Interpret the summary of the eigenvectors of a PCA on the Hellinger-transformed species data.
+\\
+What is the percentage of total variation explained by each of first three ordination axes separately?
+\\
+What is the percentage of total variation explained by the first three ordination axes in conjunction?}
+
+\subsubsection{Combining clustering and ordination results}
+You can also project a dendrogram from the cluster analysis onto an ordination, to see whether sites that form a cluster in the dendrogram (i.e. are connected by blue lines) also form clusters in the ordination. And vice versa, whether sites that cluster in the ordination form a cluster in the dendrogram (i.e. are connected by blue lines).
+<<fig.width=5, fig.height=5>>=
+plot(model2, type = "p", display="sites")
+ordicluster(model2, hclust(vegdist(decostand(dune, "hell"))), prune=3, col = "blue")
+
+@
+
+\textbf{Q: Are the ordination and clustering results consistent?
+\\
+If not, what could be the reason?}
+
+\subsubsection{Fitting environmental vectors onto an ordination}
+
+The interpretability of ordination plots can be enhanced by adding environmental information to an existing ordination plot.
+
+<<eval=T>>=
+data(dune.env)
+
+dune.env$n_moisture <- as.numeric(dune.env$Moisture)
+dune.env$n_use <- as.numeric(dune.env$Use)
+dune.env$n_manure <- as.numeric(dune.env$Manure)
+
+fit <- envfit(model2, dune.env[,c(1,6,7,8)], perm = 1000)
+fit
+
+<<fig.width=5, fig.height=5>>=
+plot(model2,display=c("sites"))
+plot(fit)
+
+@
+
+\textbf{Q: Are the two ordination axes correlated to particular environmental gradients? \\
+Identify sets of sites that have high or low values for a particular environmental variable.}
+
+\subsubsection{PCA on environmental data}
+
+Here, you use PCA on environmental variables to (i) reduce the multiple environmental variables into only few uncorrelated axes (dimensions) and (ii) explore correlation between environmental descriptors. Because variables are measured in different units, you need to scale the environmental variables prior to analysis.
+
+<<eval=T>>=
+n_env <- dune.env[,c(1,6,7,8)]
+environ <- rda(n_env,center=T,scale=T)
+
+<<fig.width=5, fig.height=5>>=
+biplot(environ)
+summary(eigenvals(environ))
+scores(environ, display = "sp")
+
+@ 
+
+\textbf{Q: In the ordination biplot, which variables are highly correlated or uncorrelated with each other?\\
+Look at the summary output. How much of the total variance in the environmental data is explained by the first two axes individually and cummulatively?\\
+Which environmental gradients are represented by the first and second ordination axis, i.e. which variables have very high or very low scores on the respective axis)?}
+
+\subsection{Correspondence analysis - CA}
+
+Correspondence analysis has been shown be a more robust method where species show unimodal, rather than linear, responses to an underlying environmental gradient.
+
+<<>>=
+CA1 <- decorana(dune,ira=1)
+
+@ 
+The "ira" argument defines whether standard or detrended correspondence analysis is carried out.\\
+ira=1 basic reciprocal averaging = correspondence analysis= CA
+ira=0, default, detrended correspondence analysis = DCA 
+
+<<fig.width=5, fig.height=5>>=
+
+plot(CA1)
+
+@ 
+Note that site and species scores are at the same scale.
+
+<<fig.width=12, fig.height=6>>=
+par(mfrow=c(1,2))
+plot(CA1,display=c("sites"))
+plot(CA1,display=c("species"))
+
+<<>>=
+print(CA1)
+
+@ 
+\textbf{Q: What are the eigenvalue for axes 1 and 2?}
+
+<<>>=
+
+fit <- envfit(CA1, n_env, perm = 1000)
+fit
+
+scores(fit, "vectors")
+plot(CA1,display=c("sites"))
+plot(fit, col = "blue")    
+
+@ 
+\pagebreak
+\subsection{Detrended correspondence analysis - DCA}
+
+Correspondence analysis (CA) along very long environmental gradients is prone to the "arch-effect", where objects in ordination space show curved patterns. Detrended correspondence analysis (DCA) can deal with this issue.
+
+<<fig.width=5, fig.height=5>>=
+
+DCA1<-decorana(dune, ira=0, iweigh=1)
+print(DCA1)
+
+plot(DCA1,display=c("sites"),type="points")
+fit3<- envfit(DCA1, n_env, perm = 1000)
+plot(DCA1,display=c("sites"))
+plot(fit3, col = "red")
+
+@ 
+\textbf{Q: Plot CA and DCA beside each other and check whether the arch(horse-shoe)-effect disappears in DCA.}
+
+<<fig.width=12, fig.height=6>>=
+par(mfrow=c(1,2))
+plot(CA1,display=c("sites"))
+plot(DCA1,,display=c("sites"))
+
+@ 
+
+\subsection{Principal coordinates analysis - PCoA}
+While PCA assumes Euclidean distances and CA (as well as DCA) Chi-Squares distances between objects, principal coordinates analysis (PCoA) is more flexible in this respect as it allows for non-Euclidean distances.
+<<echo=T>>=
+
+veg.dist <- vegdist(dune, method="bray")
+pcoa <- cmdscale(veg.dist)
+
+<<fig.width=5, fig.height=5>>=
+
+plot(pcoa)
+text(pcoa[,1], pcoa[,2], rownames(pcoa), cex = 1.4)
+
+@ 
+\subsection{Nonmetric multidimensional scaling - NMDS}
+
+Nonmetric multidimensional scaling (NMDS) is even more flexible than PCoA, as it can find non-linear relationships (unlike other methods), while being able to handle all kinds of distances.
+However, you may have to run it several times to reach a good "solution". NMDS runs for a VERY long time on huge data sets.
+
+<<echo=T>>=
+
+nmds <- metaMDS(dune)
+nmds
+
+<<fig.width=5, fig.height=5>>=
+plot(nmds, type="t")
+
+<<fig.width=12, fig.height=6>>=
+
+par(mfrow=c(1,2))
+plot(nmds, type="n")
+text(nmds, dis="species",cex=0.7)
+#points(solnmds, pch=21, col="red", bg="yellow", cex=1.2)
+text(nmds, "sites", col="blue", cex=0.7)
+plot(DCA1,type="n")
+text(DCA1, dis="species",cex=0.7)
+text(DCA1, dis="sites", col="blue",cex=0.7)
+
+@ 
+\subsection{Comparing ordinations using Procrustes rotation}
+
+You can check whether two ordination are really different (i.e. have different configurations) from each other or whether differences between ordinations are just a reflection of different scalings and rotations.
+Here we use the Procrustes-Rotation-Test to compare the NMDS ordination with PCA (on the Hellinger-transformed species data), and test whether the two ordinations are significantly similar.
+
+<<fig.width=5, fig.height=5>>=
+nmds2 <- metaMDS(dune)
+pca2 <- rda(dune)
+
+protest.nmds.pca <- protest(nmds2, pca2)
+protest.nmds.pca
+
+pro.nmds.pca <- procrustes(nmds2, pca2)
+
+plot(pro.nmds.pca)
+
+@ 
+
+The following plot (Procrustes superimposition plot) shows the differences between the NMDS ordination configuration (cicles) and those that from a PCA (arrow tips).
+
+\subsection{Surface plotting}
+So far, we have only visualized linear relationships (expressed as arrows) between the objects in an ordination and environmental variables using the envfit-function, but community responses along environmental gradients are often non-linear.
+
+<<>>=
+data(varespec)
+data(varechem)
+nmds <- metaMDS(varespec)
+
+<<fig.width=10, fig.height=8>>=
+par(mfrow=c(2,3))
+for (i in 9:14) {
+ordisurf(nmds, varechem[,i], main = colnames(varechem)[i])
+}
+
+@ 
+\section{Constrained ordination (direct gradient analysis)}
+Until now, you have performed unconstrained ordination methods, a passive form of gradient analysis, with a-posteriori interpretation of environmental variables.
+Now, you will run constrained ordination, an approach that directly explores the relationships between community composition and environmental variables.
+
+
+\subsection{Redundancy analysis - RDA}
+RDA combines regression and PCA. Remember, when running PCA-based methods on species-data, we first have to Hellinger-transform the community data so that it represents Euclidean space.
+
+<<fig.width=5, fig.height=5>>=
+dune.hel <- decostand(dune, "hell")
+rda.dune <- rda(dune.hel, dune.env[,c(1,6:8)])
+plot(rda.dune)
+print(rda.dune)
+
+@
+
+\textbf{Q: Have a look at the summary-output:\\
+What is the total variance (inertia) in the data set?\\
+What is the proportation of variance explained by the environmental variables (constrained proportion)?\\
+What is the proportation of variance that remains unexplained (unconstrained proportion)?}
+
+<<>>=
+summary(eigenvals(rda.dune))
+
+@
+\textbf{Q: Have a look at the summary of the eigenvalues:\\
+What is the proportation of variance explained by the first 2 constrained (RDA) axes?\\
+What is the proportation of variance explained by the first 2 unconstrained (PC) axes for the residuals?\\
+In the biplot-scores, which environmental variables are important on RDA-axis 1 and 2?\\
+In the ordination-plot, which species are associated with particular management types, moisture levels etc.?
+}
+
+\pagebreak
+
+\subsubsection{Variation partitioning}
+
+You may also be interested in quantifying the extent to which variation in community composition is explained by different sets of variables, e.g. set 1: (soil depth (A1) and moisture (n.moisture) and set 2: land use intensity (n.use) and fertilization (manure)). Variation partitioning analysis allows partialling out the shared and unique contributions of the different sets of predictors in explaining community composition.
+
+<<>>=
+
+soil <- dune.env[, c(1, 6)] # set 1
+management <- dune.env[, c(7:8)] # set 2
+
+dune.part <- varpart(dune.hel, soil, management)
+print(dune.part)
+<<fig.width=4.5, fig.height=4>>=
+plot(dune.part)
+@
+\textbf{Q: What is the unique contribution (individual fraction) the two variable groups (X1: soil and X2: management) in explaining community composition?\\
+What percentage of the total variation remains unexplained?}
+
+\subsection{Distance-based redundancy analysis - dbRDA}
+
+Unlike RDA, which is based on Euclidean distances, distance-based redundancy analysis (dbRDA) can take all kinds of ecologically meaningful distances (e.g. Bray-Curtis), as it is based on principal coordinates analysis (PCoA).
+
+<<echo=T>>=
+
+dune.bray <- vegdist(dune, "bray")
+dune.db.rda <- capscale(dune.bray ~ A1 + n_moisture + n_use + n_manure,  dune.env)
+
+<<fig.width=4.5, fig.height=4>>=
+
+plot(dune.db.rda)
+
+@ 
+\subsection{Canonical correspondence analysis - CCA}
+Canonical correspondence analysis (CCA) is the constrained version of CA, thus is based on Chi-square distances.
+Unlike RDA, CCA does not allow for variation partioning analysis and doesn't have the flexibility of incorporating different types of distances (as can be done with db-RDA).
+CCA-output, however, is interpretated similarily to that of RDA. 
+
+<<echo=T>>=
+
+dune.env$n_moisture <- as.numeric(dune.env$Moisture)
+dune.env$n_use <- as.numeric(dune.env$Use)
+dune.env$n_manure <- as.numeric(dune.env$Manure)
+
+dune.cca <- vegan::cca(dune, dune.env[,c(1,6:8)])
+
+print(dune.cca)
+summary(eigenvals(dune.cca))
+
+<<fig.width=5, fig.height=5>>=
+
+plot(dune.cca)
+
+
+<<>>=
+sessionInfo()
+@ 
+
+%\bibliographystyle{apa}
+\bibliography{/home/olli/Dokumente/PhD/Literatur/Bibfile/dislit}
+
+
+\end{document}
